@@ -1332,7 +1332,7 @@ async function loadEconomicCalendar(){
   try{
     const today=new Date(),end=new Date(today);end.setDate(end.getDate()+7);
     const fmt=d=>d.toISOString().split('T')[0];
-    const res=await fetch(`https://financialmodelingprep.com/api/v3/economic_calendar?from=${fmt(today)}&to=${fmt(end)}&apikey=TarMpqKiBroU4zmm5CYCW3RBtQwCBuG8`);
+    const res=await fetch(`https://financialmodelingprep.com/api/v3/economic_calendar?from=${fmt(today)}&to=${fmt(end)}&apikey=tarMpqKiBroU4zmm5CYCW3RBtQwCBuG8`);
     const data=await res.json();
     if(!Array.isArray(data)||!data.length) throw new Error('empty');
     const events=data.filter(e=>e.country==='US'&&(e.impact==='High'||e.impact==='Medium')).slice(0,14);

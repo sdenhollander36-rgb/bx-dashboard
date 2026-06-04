@@ -691,7 +691,7 @@ function calcFVB(opens,highs,lows,closes,p=33){
 }
 async function fetchCandles(ticker,interval){
   // Use 'max' range to match TradingView's full history — critical for RSI accuracy
-  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=${interval}&range=max`;
+  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=${interval}&range=max&includeAdjustedClose=false&events=`;
   const res=await fetch(PROXY(url));
   const data=await res.json();
   const r=data?.chart?.result?.[0];

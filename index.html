@@ -647,25 +647,39 @@ async function fetchMeta(ticker) {
 // ═══════════════════════════════
 //  BX CALCULATION
 // ═══════════════════════════════
-function ema(arr, period) {
-  const k=2/(period+1); let e=arr[0]; const r=[e];
-  for(let i=1;i<arr.length;i++){e=arr[i]*k+e*(1-k);r.push(e);}
+// TradingView-accurate EMA: first value = first close, then standard EMA
+function tvEma(arr, period) {
+  const k=2/(period+1);
+  const r=[arr[0]];
+  for(let i=1;i<arr.length;i++) r.push(arr[i]*k+r[r.length-1]*(1-k));
   return r;
 }
-function rsi(arr, period) {
+// TradingView-accurate RSI: Wilder smoothing with simple average seed
+function tvRsi(arr, period) {
   const r=new Array(arr.length).fill(null);
-  let ag=0,al=0;
-  for(let i=1;i<=period;i++){const d=arr[i]-arr[i-1];if(d>0)ag+=d;else al-=d;}
-  ag/=period;al/=period;
+  let ag=0, al=0;
+  // Seed: simple average of first `period` changes
+  for(let i=1;i<=period;i++){
+    const d=arr[i]-arr[i-1];
+    if(d>0) ag+=d; else al-=d;
+  }
+  ag/=period; al/=period;
   r[period]=100-100/(1+(al===0?1e10:ag/al));
+  // Wilder smoothing
   for(let i=period+1;i<arr.length;i++){
     const d=arr[i]-arr[i-1],g=d>0?d:0,l=d<0?-d:0;
-    ag=(ag*(period-1)+g)/period;al=(al*(period-1)+l)/period;
+    ag=(ag*(period-1)+g)/period;
+    al=(al*(period-1)+l)/period;
     r[i]=100-100/(1+(al===0?1e10:ag/al));
   }
   return r;
 }
-function calcBX(closes){const e5=ema(closes,5),e20=ema(closes,20),diff=e5.map((v,i)=>v-e20[i]),r=rsi(diff,5);return r.map(v=>v===null?null:v-50);}
+function calcBX(closes){
+  const e5=tvEma(closes,5),e20=tvEma(closes,20);
+  const diff=e5.map((v,i)=>v-e20[i]);
+  const r=tvRsi(diff,5);
+  return r.map(v=>v===null?null:v-50);
+}
 function calcFVB(opens,highs,lows,closes,p=33){
   const ohlc4=opens.map((o,i)=>(o+highs[i]+lows[i]+closes[i])/4),res=[];
   for(let i=0;i<ohlc4.length;i++){
@@ -675,19 +689,21 @@ function calcFVB(opens,highs,lows,closes,p=33){
   }
   return res;
 }
-async function fetchCandles(ticker,interval,range){
-  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=${interval}&range=${range}`;
+async function fetchCandles(ticker,interval){
+  // Use 'max' range to match TradingView's full history — critical for RSI accuracy
+  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=${interval}&range=max`;
   const res=await fetch(PROXY(url));
   const data=await res.json();
   const r=data?.chart?.result?.[0];
   if(!r) return null;
-  const q=r.indicators.quote[0],adj=r.indicators.adjclose?.[0]?.adjclose||q.close;
-  return {opens:q.open,highs:q.high,lows:q.low,closes:adj};
+  // Use unadjusted close (auto_adjust=False equivalent) to match TradingView
+  const q=r.indicators.quote[0];
+  return {opens:q.open,highs:q.high,lows:q.low,closes:q.close};
 }
 async function calcBXIndicators(ticker){
   if(bxCache[ticker]&&Date.now()-bxCache[ticker].ts<30*60*1000) return bxCache[ticker].data;
   try{
-    const[weekly,monthly]=await Promise.all([fetchCandles(ticker,'1wk','2y'),fetchCandles(ticker,'1mo','2y')]);
+    const[weekly,monthly]=await Promise.all([fetchCandles(ticker,'1wk'),fetchCandles(ticker,'1mo')]);
     if(!weekly||weekly.closes.length<40||!monthly||monthly.closes.length<5) return null;
     const bxW=calcBX(weekly.closes),fvbW=calcFVB(weekly.opens,weekly.highs,weekly.lows,weekly.closes),bxM=calcBX(monthly.closes);
     const wbxCur=bxW[bxW.length-1],wbxPrev=bxW[bxW.length-2];
@@ -1332,7 +1348,7 @@ async function loadEconomicCalendar(){
   try{
     const today=new Date(),end=new Date(today);end.setDate(end.getDate()+7);
     const fmt=d=>d.toISOString().split('T')[0];
-    const res=await fetch(`https://financialmodelingprep.com/api/v3/economic_calendar?from=${fmt(today)}&to=${fmt(end)}&apikey=tarMpqKiBroU4zmm5CYCW3RBtQwCBuG8`);
+    const res=await fetch(`https://financialmodelingprep.com/api/v3/economic_calendar?from=${fmt(today)}&to=${fmt(end)}`);
     const data=await res.json();
     if(!Array.isArray(data)||!data.length) throw new Error('empty');
     const events=data.filter(e=>e.country==='US'&&(e.impact==='High'||e.impact==='Medium')).slice(0,14);

@@ -568,7 +568,21 @@ textarea{resize:vertical;min-height:56px;}
 const GITHUB_USER   = 'sdenhollander36-rgb';
 const GITHUB_REPO   = 'bx-dashboard';
 const GITHUB_BRANCH = 'main';
-const PROXY = url => `https://corsproxy.io/?${encodeURIComponent(url)}`;
+async function PROXY(url) {
+  // Try multiple CORS proxies in order until one works
+  const proxies = [
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    `https://proxy.cors.sh/${url}`,
+  ];
+  for (const proxy of proxies) {
+    try {
+      const res = await fetch(proxy);
+      if (res.ok) return res;
+    } catch(e) {}
+  }
+  throw new Error('All CORS proxies failed');
+}
 
 // ═══════════════════════════════
 //  STATE
@@ -608,7 +622,7 @@ async function fetchPrice(ticker) {
     return priceCache[ticker];
   try {
     const url  = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`;
-    const res  = await fetch(PROXY(url));
+    const res  = await PROXY(url);
     const data = await res.json();
     const meta = data?.chart?.result?.[0]?.meta;
     const quotes = data?.chart?.result?.[0]?.indicators?.quote?.[0];
@@ -631,7 +645,7 @@ async function fetchMeta(ticker) {
   if (metaCache[ticker]) return metaCache[ticker];
   try {
     const url  = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=assetProfile,summaryProfile,price`;
-    const res  = await fetch(PROXY(url));
+    const res  = await PROXY(url);
     const data = await res.json();
     const prof = data?.quoteSummary?.result?.[0];
     const meta = {
@@ -692,7 +706,7 @@ function calcFVB(opens,highs,lows,closes,p=33){
 async function fetchCandles(ticker,interval){
   // Use 'max' range to match TradingView's full history — critical for RSI accuracy
   const url=`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=${interval}&range=max&includeAdjustedClose=false&events=`;
-  const res=await fetch(PROXY(url));
+  const res=await PROXY(url);
   const data=await res.json();
   const r=data?.chart?.result?.[0];
   if(!r) return null;
@@ -1004,7 +1018,7 @@ async function loadEarnings(){
     await Promise.all(tickers.map(async t=>{
       try{
         const url=`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${t}?modules=calendarEvents,price`;
-        const res=await fetch(PROXY(url));
+        const res=await PROXY(url);
         const data=await res.json();
         const cal=data?.quoteSummary?.result?.[0]?.calendarEvents;
         const pr=data?.quoteSummary?.result?.[0]?.price;
@@ -1058,7 +1072,7 @@ async function loadNews(){
         const url=`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${t}?modules=assetProfile`;
         // Use Yahoo Finance news search
         const url2=`https://query2.finance.yahoo.com/v1/finance/search?q=${t}&newsCount=5&quotesCount=0`;
-        const res=await fetch(PROXY(url2));
+        const res=await PROXY(url2);
         const data=await res.json();
         (data?.news||[]).slice(0,4).forEach(n=>{
           allNews.push({

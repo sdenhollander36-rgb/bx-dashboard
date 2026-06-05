@@ -621,16 +621,11 @@ async function fetchPrice(ticker) {
   if (priceCache[ticker] && Date.now()-priceCache[ticker].ts < 15*60*1000)
     return priceCache[ticker];
   try {
-    const url  = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`;
-    const res  = await PROXY(url);
+    // Use Vercel API for price too — already fetched alongside BX
+    const res  = await fetch(`${BX_API}?ticker=${ticker}`);
     const data = await res.json();
-    const meta = data?.chart?.result?.[0]?.meta;
-    const quotes = data?.chart?.result?.[0]?.indicators?.quote?.[0];
-    if (meta?.regularMarketPrice) {
-      const closes = quotes?.close?.filter(Boolean) || [];
-      const prev   = closes.length >= 2 ? closes[closes.length-2] : meta.chartPreviousClose;
-      const cur    = meta.regularMarketPrice;
-      const obj    = { price: cur, prev, change: cur - prev, changePct: ((cur-prev)/prev)*100, ts: Date.now() };
+    if (data.price) {
+      const obj = { price: data.price, prev: null, change: null, changePct: null, ts: Date.now() };
       priceCache[ticker] = obj;
       return obj;
     }
@@ -659,73 +654,24 @@ async function fetchMeta(ticker) {
 }
 
 // ═══════════════════════════════
-//  BX CALCULATION
+//  BX CALCULATION — via Vercel API
+//  Runs exact same Python code as TradingView
 // ═══════════════════════════════
-// TradingView-accurate EMA: first value = first close, then standard EMA
-function tvEma(arr, period) {
-  const k=2/(period+1);
-  const r=[arr[0]];
-  for(let i=1;i<arr.length;i++) r.push(arr[i]*k+r[r.length-1]*(1-k));
-  return r;
-}
-// TradingView-accurate RSI: Wilder smoothing with simple average seed
-function tvRsi(arr, period) {
-  const r=new Array(arr.length).fill(null);
-  let ag=0, al=0;
-  // Seed: simple average of first `period` changes
-  for(let i=1;i<=period;i++){
-    const d=arr[i]-arr[i-1];
-    if(d>0) ag+=d; else al-=d;
-  }
-  ag/=period; al/=period;
-  r[period]=100-100/(1+(al===0?1e10:ag/al));
-  // Wilder smoothing
-  for(let i=period+1;i<arr.length;i++){
-    const d=arr[i]-arr[i-1],g=d>0?d:0,l=d<0?-d:0;
-    ag=(ag*(period-1)+g)/period;
-    al=(al*(period-1)+l)/period;
-    r[i]=100-100/(1+(al===0?1e10:ag/al));
-  }
-  return r;
-}
-function calcBX(closes){
-  const e5=tvEma(closes,5),e20=tvEma(closes,20);
-  const diff=e5.map((v,i)=>v-e20[i]);
-  const r=tvRsi(diff,5);
-  return r.map(v=>v===null?null:v-50);
-}
-function calcFVB(opens,highs,lows,closes,p=33){
-  const ohlc4=opens.map((o,i)=>(o+highs[i]+lows[i]+closes[i])/4),res=[];
-  for(let i=0;i<ohlc4.length;i++){
-    if(i<p-1){res.push(null);continue;}
-    const sl=ohlc4.slice(i-p+1,i+1),m=sl.reduce((a,b)=>a+b,0)/p;
-    res.push(lows[i]>m);
-  }
-  return res;
-}
-async function fetchCandles(ticker,interval){
-  // Use 'max' range to match TradingView's full history — critical for RSI accuracy
-  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=${interval}&range=max&includeAdjustedClose=false&events=`;
-  const res=await PROXY(url);
-  const data=await res.json();
-  const r=data?.chart?.result?.[0];
-  if(!r) return null;
-  // Use unadjusted close (auto_adjust=False equivalent) to match TradingView
-  const q=r.indicators.quote[0];
-  return {opens:q.open,highs:q.high,lows:q.low,closes:q.close};
-}
+const BX_API = 'https://bx-api-leq4.vercel.app/api/bx';
+
 async function calcBXIndicators(ticker){
-  if(bxCache[ticker]&&Date.now()-bxCache[ticker].ts<30*60*1000) return bxCache[ticker].data;
+  if(bxCache[ticker]&&Date.now()-bxCache[ticker].ts<15*60*1000) return bxCache[ticker].data;
   try{
-    const[weekly,monthly]=await Promise.all([fetchCandles(ticker,'1wk'),fetchCandles(ticker,'1mo')]);
-    if(!weekly||weekly.closes.length<40||!monthly||monthly.closes.length<5) return null;
-    const bxW=calcBX(weekly.closes),fvbW=calcFVB(weekly.opens,weekly.highs,weekly.lows,weekly.closes),bxM=calcBX(monthly.closes);
-    const wbxCur=bxW[bxW.length-1],wbxPrev=bxW[bxW.length-2];
-    const fvbCur=fvbW[fvbW.length-1],fvbPrev=fvbW[fvbW.length-2];
-    const mbxCur=bxM[bxM.length-1],mbxPrev=bxM[bxM.length-2];
-    const wbxGreen=wbxCur>0,fvbGreen=fvbCur===true;
-    const mbxGreen=mbxCur!==null&&mbxCur>0&&!(mbxCur<mbxPrev&&mbxCur<0);
-    const result={wbx:wbxGreen?'green':'red',fvb:fvbGreen?'green':'red',mbx:mbxGreen?'green':'red'};
+    const res  = await fetch(`${BX_API}?ticker=${ticker}`);
+    const data = await res.json();
+    if(data.error) return null;
+    const result = {
+      wbx: data.wbx_green  ? 'green' : 'red',
+      fvb: data.fvb_green  ? 'green' : 'red',
+      mbx: data.mbx_green  ? 'green' : 'red',
+      wbxVal: data.wbx,
+      mbxVal: data.mbx,
+    };
     bxCache[ticker]={data:result,ts:Date.now()};
     return result;
   }catch(e){return null;}
@@ -753,18 +699,21 @@ async function refreshAll(){
   btn.style.opacity='.5';btn.style.pointerEvents='none';
   const tickers=[...new Set(positions.map(p=>p.ticker))];
   await Promise.all(tickers.map(async t=>{
-    const[pd,bx]=await Promise.all([fetchPrice(t),calcBXIndicators(t)]);
-    positions.forEach(p=>{
-      if(p.ticker===t){
-        if(pd) p.currentPrice=pd.price;
-        if(bx){p.wbx=bx.wbx;p.fvb=bx.fvb;p.mbx=bx.mbx;}
-      }
-    });
+    try{
+      const res=await fetch(`${BX_API}?ticker=${t}`);
+      const data=await res.json();
+      if(data.error) return;
+      priceCache[t]={price:data.price,prev:null,change:null,changePct:null,ts:Date.now()};
+      const bx={wbx:data.wbx_green?'green':'red',fvb:data.fvb_green?'green':'red',mbx:data.mbx_green?'green':'red'};
+      bxCache[t]={data:bx,ts:Date.now()};
+      positions.forEach(p=>{
+        if(p.ticker===t){p.currentPrice=data.price;p.wbx=bx.wbx;p.fvb=bx.fvb;p.mbx=bx.mbx;}
+      });
+    }catch(e){}
   }));
   save();render();
   btn.style.opacity='';btn.style.pointerEvents='';
   document.getElementById('lastUpdated').textContent='Updated '+new Date().toLocaleTimeString();
-  // Also refresh secondary sections
   renderGainersLosers();
   renderDistribution();
   loadEarnings();

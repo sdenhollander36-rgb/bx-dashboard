@@ -695,6 +695,9 @@ function getSignal(p){
 //  REFRESH ALL
 // ═══════════════════════════════
 async function refreshAll(){
+  // Always reload from localStorage first to avoid overwriting closed trades
+  positions    = JSON.parse(localStorage.getItem('bx_positions') || '[]');
+  closedTrades = JSON.parse(localStorage.getItem('bx_closed')    || '[]');
   const btn=document.querySelector('.refresh-btn');
   btn.style.opacity='.5';btn.style.pointerEvents='none';
   const tickers=[...new Set(positions.map(p=>p.ticker))];

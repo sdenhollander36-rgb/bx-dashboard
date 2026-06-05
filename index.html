@@ -625,7 +625,7 @@ async function fetchPrice(ticker) {
     const res  = await fetch(`${BX_API}?ticker=${ticker}`);
     const data = await res.json();
     if (data.price) {
-      const obj = { price: data.price, prev: null, change: null, changePct: null, ts: Date.now() };
+      const obj = { price: data.price, prev: null, change: null, changePct: data.change_pct||null, ts: Date.now() };
       priceCache[ticker] = obj;
       return obj;
     }
@@ -706,7 +706,7 @@ async function refreshAll(){
       const res=await fetch(`${BX_API}?ticker=${t}`);
       const data=await res.json();
       if(data.error) return;
-      priceCache[t]={price:data.price,prev:null,change:null,changePct:null,ts:Date.now()};
+      priceCache[t]={price:data.price,prev:null,change:null,changePct:data.change_pct||null,ts:Date.now()};
       const bx={wbx:data.wbx_green?'green':'red',fvb:data.fvb_green?'green':'red',mbx:data.mbx_green?'green':'red'};
       bxCache[t]={data:bx,ts:Date.now()};
       positions.forEach(p=>{
